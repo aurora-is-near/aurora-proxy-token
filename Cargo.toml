@@ -30,7 +30,9 @@ container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "-
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
+near-plugins = { git = "https://github.com/Near-One/near-plugins.git", tag = "v0.4.1" }
 near-sdk = "5.7"
+serde = { version = "1.0.217", features = ["derive"] }
 
 [dev-dependencies]
 anyhow = "1"

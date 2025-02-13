@@ -189,6 +189,7 @@ pub async fn make_withdraw(
     proxy_id: &AccountId,
     near_receiver_id: &AccountId,
     amount: U128,
+    msg: Option<String>,
 ) -> anyhow::Result<()> {
     let value = U256::from(amount.0).to_big_endian();
     let result = user
@@ -202,6 +203,7 @@ pub async fn make_withdraw(
                 b":",
                 near_receiver_id.as_bytes(),
                 b":",
+                msg.unwrap_or_default().as_bytes(),
             ]
             .concat(),
         }))
