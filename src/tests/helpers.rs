@@ -4,21 +4,51 @@ use aurora_engine_types::U256;
 use near_sdk::json_types::U128;
 use near_sdk::{AccountId, NearToken};
 use near_workspaces::network::Sandbox;
-use near_workspaces::{Account, Contract, Worker};
+use near_workspaces::{compile_project, Account, Contract, Worker};
 use serde_json::json;
+use tokio::sync::OnceCell;
 
 const FT_PATH: &str = "res/fungible-token.wasm";
 const AURORA_PATH: &str = "res/aurora-mainnet-silo-3.8.0.wasm";
 const EXIT_TO_NEAR_PRECOMPILE: &str = "e9217bc70b7ed1f598ddd3199e80b093fa71124f";
 const STORAGE_DEPOSIT: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
 
+static PROXY_CODE: OnceCell<Vec<u8>> = OnceCell::const_new();
+
+pub struct Env {
+    pub user: Account,
+    pub token: Contract,
+    pub engine: Contract,
+    pub proxy: Contract,
+}
+
+pub async fn env(
+    sandbox: &Worker<Sandbox>,
+    init_supply: u128,
+    decimals: u8,
+) -> anyhow::Result<Env> {
+    let user = sandbox.dev_create_account().await?;
+    let token = deploy_fungible_token(sandbox, init_supply).await?;
+    let engine = deploy_aurora(sandbox).await?;
+    let proxy = deploy_proxy(sandbox, token.id(), decimals).await?;
+
+    Ok(Env {
+        user,
+        token,
+        engine,
+        proxy,
+    })
+}
+
 pub async fn deploy_proxy(
     sandbox: &Worker<Sandbox>,
     token_id: &AccountId,
     decimals: u8,
 ) -> anyhow::Result<Contract> {
-    let contract_wasm = near_workspaces::compile_project("./").await?;
-    let contract = sandbox.dev_deploy_tla(&contract_wasm).await?;
+    let contract_wasm = PROXY_CODE
+        .get_or_init(|| async { compile_project(".").await.unwrap() })
+        .await;
+    let contract = sandbox.dev_deploy_tla(contract_wasm).await?;
     let result = contract
         .call("new")
         .args_json(json!({"token_id": token_id, "decimals": decimals}))
@@ -146,9 +176,11 @@ pub async fn make_deposit(
         .max_gas()
         .transact()
         .await?;
-    assert!(result.is_success(), "{result:?}");
 
-    Ok(())
+    match result.into_result() {
+        Ok(_) => Ok(()),
+        Err(e) => anyhow::bail!(e),
+    }
 }
 
 pub async fn make_withdraw(
