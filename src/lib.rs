@@ -1,10 +1,13 @@
 use near_sdk::json_types::U128;
-use near_sdk::serde_json::{self, json};
+use near_sdk::serde_json;
 use near_sdk::{
-    env, log, near, require, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseOrValue,
-    PromiseResult,
+    env, ext_contract, log, near, require, AccountId, Gas, NearToken, PanicOnDefault,
+    PromiseOrValue, PromiseResult,
 };
 use std::str::FromStr;
+
+#[cfg(test)]
+mod tests;
 
 const META_MASK_DECIMALS: u8 = 18;
 const GAS_FOR_FT_ON_TRANSFER: Gas = Gas::from_tgas(20);
@@ -41,14 +44,7 @@ impl AuroraProxyToken {
             format!("Only on {} can call `ft_transfer_call`", self.token_id)
         );
 
-        let (receiver_id, msg) = parse_message(&msg)
-            .map(|(receiver_id, msg)| {
-                (
-                    receiver_id.unwrap_or_else(|| env::panic_str("Receiver is not specified")),
-                    msg,
-                )
-            })
-            .unwrap_or_else(|| env::panic_str(&format!("Wrong message format: {msg}")));
+        let (receiver_id, msg) = parse_message(&msg).unwrap_or_else(|e| env::panic_str(e.as_ref()));
 
         let amount = self
             .modify_amount(amount, self.withdraw_action())
@@ -62,16 +58,10 @@ impl AuroraProxyToken {
                 &receiver_id,
             );
 
-            Promise::new(self.token_id.clone()).function_call(
-                "ft_transfer".to_string(),
-                serde_json::to_vec(&json!({
-                    "receiver_id": receiver_id, // intents.near
-                    "amount": amount
-                }))
-                .unwrap(),
-                NearToken::from_yoctonear(1),
-                GAS_FOR_FT_TRANSFER,
-            )
+            ext_ft::ext(self.token_id.clone())
+                .with_static_gas(GAS_FOR_FT_TRANSFER)
+                .with_attached_deposit(NearToken::from_yoctonear(1))
+                .ft_transfer(receiver_id.clone(), amount)
         } else {
             log!(
                 "ft_transfer_call {} on token: {}, to {} with message {:?}",
@@ -81,39 +71,27 @@ impl AuroraProxyToken {
                 &msg
             );
 
-            let Message { msg, memo } = serde_json::from_str(msg)
+            let Message { msg, memo } = serde_json::from_str(&msg)
                 .unwrap_or_else(|_| env::panic_str(&format!("Wrong message format: {msg}")));
 
-            Promise::new(self.token_id.clone()).function_call(
-                "ft_transfer_call".to_string(),
-                serde_json::to_vec(&json!({
-                    "receiver_id": receiver_id, // intents.near
-                    "amount": amount,
-                    "memo": memo,
-                    "msg": msg,
-                }))
-                .unwrap(),
-                NearToken::from_yoctonear(1),
-                GAS_FOR_FT_TRANSFER_CALL,
-            )
+            ext_ft::ext(self.token_id.clone())
+                .with_attached_deposit(NearToken::from_yoctonear(1))
+                .with_static_gas(GAS_FOR_FT_TRANSFER_CALL)
+                .ft_transfer_call(receiver_id.clone(), amount, memo, msg)
         };
 
-        PromiseOrValue::Promise(
-            promise.then(
-                Promise::new(env::current_account_id()).function_call(
-                    "ft_resolve_withdraw".to_string(),
-                    serde_json::to_vec(&json!({
-                        "sender_id": env::current_account_id(),
-                        "receiver_id": receiver_id,
-                        "amount": amount,
-                        "is_call": !msg.is_empty(),
-                    }))
-                    .unwrap(),
-                    NearToken::from_yoctonear(0),
-                    GAS_FOR_FT_RESOLVE,
-                ),
-            ),
-        )
+        promise
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_FT_RESOLVE)
+                    .ft_resolve_withdraw(
+                        env::current_account_id(),
+                        receiver_id,
+                        amount,
+                        !msg.is_empty(),
+                    ),
+            )
+            .into()
     }
 
     pub fn ft_on_transfer(
@@ -122,7 +100,6 @@ impl AuroraProxyToken {
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128> {
-        // silo.aurora.near:fe71e451caabd1d87bdb75891430eb90a4956839
         require!(
             env::predecessor_account_id() == self.token_id,
             format!("Only {} can call this method", self.token_id)
@@ -135,40 +112,23 @@ impl AuroraProxyToken {
             msg
         );
 
-        let (engine_id, evm_receiver) = parse_message(&msg)
-            .unwrap_or_else(|| env::panic_str(&format!("Wrong message format: {msg}")));
+        let (engine_id, evm_receiver) =
+            parse_message(&msg).unwrap_or_else(|e| env::panic_str(e.as_ref()));
 
         let amount = self
             .modify_amount(amount, self.deposit_action())
             .unwrap_or_else(|e| env::panic_str(e.as_ref()));
 
-        PromiseOrValue::Promise(
-            Promise::new(engine_id.clone().unwrap())
-                .function_call(
-                    "ft_on_transfer".to_string(),
-                    serde_json::to_vec(&json!({
-                        "sender_id": env::current_account_id(),
-                        "amount": amount,
-                        "msg": evm_receiver,
-                    }))
-                    .unwrap(),
-                    NearToken::from_yoctonear(1),
-                    GAS_FOR_FT_ON_TRANSFER,
-                )
-                .then(
-                    Promise::new(env::current_account_id()).function_call(
-                        "ft_resolve_deposit".to_string(),
-                        serde_json::to_vec(&json!({
-                            "sender_id": env::current_account_id(),
-                            "receiver_id": engine_id,
-                            "amount": amount,
-                        }))
-                        .unwrap(),
-                        NearToken::from_yoctonear(0),
-                        GAS_FOR_FT_RESOLVE,
-                    ),
-                ),
-        )
+        ext_ft::ext(engine_id.clone())
+            .with_attached_deposit(NearToken::from_yoctonear(1))
+            .with_static_gas(GAS_FOR_FT_ON_TRANSFER)
+            .ft_on_transfer(sender_id, amount, evm_receiver)
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_FT_RESOLVE)
+                    .ft_resolve_deposit(env::current_account_id(), engine_id, amount),
+            )
+            .into()
     }
 
     #[private]
@@ -245,14 +205,17 @@ impl AuroraProxyToken {
         match action {
             Action::Decrease(decimals) => {
                 let amount = amount.0.saturating_div(10u128.pow(decimals as u32));
-                require!(amount > 0, Error::TooLowDeposit.as_ref());
+
+                if amount == 0 {
+                    return Err(Error::TooLowAmount);
+                }
 
                 Ok(U128(amount))
             }
             Action::Increase(decimals) => amount
                 .0
                 .checked_mul(10u128.pow(decimals as u32))
-                .ok_or(Error::TooHighDeposit)
+                .ok_or(Error::TooHighAmount)
                 .map(U128),
         }
     }
@@ -285,21 +248,51 @@ enum Action {
     Increase(u8),
 }
 
-fn parse_message(msg: &str) -> Option<(Option<AccountId>, &str)> {
+fn parse_message(msg: &str) -> Result<(AccountId, String), Error> {
     msg.split_once(':')
-        .map(|(acc, msg)| (AccountId::from_str(acc).ok(), msg))
+        .map(|(acc, msg)| {
+            (
+                AccountId::from_str(acc)
+                    .unwrap_or_else(|_| env::panic_str(Error::BadAccountId.as_ref())),
+                msg.to_string(),
+            )
+        })
+        .ok_or(Error::WrongMessage)
 }
 
+#[ext_contract(ext_ft)]
+pub trait FungibleToken {
+    fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128);
+    fn ft_transfer_call(
+        &mut self,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+        msg: String,
+    ) -> PromiseOrValue<U128>;
+    fn ft_on_transfer(
+        &mut self,
+        sender_id: AccountId,
+        amount: U128,
+        msg: String,
+    ) -> PromiseOrValue<U128>;
+}
+
+#[derive(Debug)]
 enum Error {
-    TooLowDeposit,
-    TooHighDeposit,
+    TooLowAmount,
+    TooHighAmount,
+    BadAccountId,
+    WrongMessage,
 }
 
 impl AsRef<str> for Error {
     fn as_ref(&self) -> &str {
         match self {
-            Self::TooLowDeposit => "Deposit is too low",
-            Self::TooHighDeposit => "Deposit is too high",
+            Self::TooLowAmount => "Amount is too low",
+            Self::TooHighAmount => "Amount is too high",
+            Self::BadAccountId => "Bad account_id",
+            Self::WrongMessage => "Wrong message format",
         }
     }
 }
