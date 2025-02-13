@@ -1,9 +1,12 @@
+use near_plugins::{access_control, pause, AccessControlRole, AccessControllable, Pausable};
+use near_sdk::borsh::BorshDeserialize;
 use near_sdk::json_types::U128;
 use near_sdk::serde_json;
 use near_sdk::{
     env, ext_contract, log, near, require, AccountId, Gas, NearToken, PanicOnDefault,
     PromiseOrValue, PromiseResult,
 };
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 #[cfg(test)]
@@ -15,7 +18,14 @@ const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_FOR_FT_TRANSFER_CALL: Gas = Gas::from_tgas(50);
 const GAS_FOR_FT_RESOLVE: Gas = Gas::from_tgas(10);
 
-#[derive(Debug, PanicOnDefault)]
+#[derive(AccessControlRole, Serialize, Deserialize, Copy, Clone)]
+enum Role {
+    PauseManager,
+}
+
+#[derive(Debug, PanicOnDefault, Pausable)]
+#[access_control(role_type(Role))]
+#[pausable(manager_roles(Role::PauseManager))]
 #[near(contract_state)]
 pub struct AuroraProxyToken {
     token_id: AccountId,
@@ -26,10 +36,33 @@ pub struct AuroraProxyToken {
 impl AuroraProxyToken {
     #[init]
     #[allow(clippy::use_self)]
-    pub const fn new(token_id: AccountId, decimals: u8) -> Self {
-        Self { token_id, decimals }
+    pub fn new(token_id: AccountId, decimals: u8) -> Self {
+        let mut contract = Self { token_id, decimals };
+        let current_account_id = env::current_account_id();
+
+        let mut acl = contract.acl_get_or_init();
+
+        require!(
+            acl.add_super_admin_unchecked(&current_account_id),
+            "Failed to add super admin"
+        );
+        require!(
+            acl.grant_role_unchecked(Role::PauseManager, &current_account_id),
+            "Failed to grant PauseManager role"
+        );
+
+        contract
     }
 
+    pub fn get_token_id(&self) -> AccountId {
+        self.token_id.clone()
+    }
+
+    pub const fn get_decimals(&self) -> u8 {
+        self.decimals
+    }
+
+    #[pause]
     #[payable]
     #[allow(unused_variables)]
     pub fn ft_transfer_call(
@@ -46,8 +79,7 @@ impl AuroraProxyToken {
 
         let (receiver_id, msg) = parse_message(&msg).unwrap_or_else(|e| env::panic_str(e.as_ref()));
 
-        let amount = self
-            .modify_amount(amount, self.withdraw_action())
+        let amount = modify_amount(amount, withdraw_action(self.decimals))
             .unwrap_or_else(|e| env::panic_str(e.as_ref()));
 
         let promise = if msg.is_empty() {
@@ -94,6 +126,7 @@ impl AuroraProxyToken {
             .into()
     }
 
+    #[pause]
     pub fn ft_on_transfer(
         &mut self,
         sender_id: AccountId,
@@ -115,12 +148,10 @@ impl AuroraProxyToken {
         let (engine_id, evm_receiver) =
             parse_message(&msg).unwrap_or_else(|e| env::panic_str(e.as_ref()));
 
-        let amount = self
-            .modify_amount(amount, self.deposit_action())
+        let amount = modify_amount(amount, deposit_action(self.decimals))
             .unwrap_or_else(|e| env::panic_str(e.as_ref()));
 
         ext_ft::ext(engine_id.clone())
-            .with_attached_deposit(NearToken::from_yoctonear(1))
             .with_static_gas(GAS_FOR_FT_ON_TRANSFER)
             .ft_on_transfer(sender_id, amount, evm_receiver)
             .then(
@@ -200,41 +231,6 @@ impl AuroraProxyToken {
 
         U128(used)
     }
-
-    fn modify_amount(&self, amount: U128, action: Action) -> Result<U128, Error> {
-        match action {
-            Action::Decrease(decimals) => {
-                let amount = amount.0.saturating_div(10u128.pow(decimals as u32));
-
-                if amount == 0 {
-                    return Err(Error::TooLowAmount);
-                }
-
-                Ok(U128(amount))
-            }
-            Action::Increase(decimals) => amount
-                .0
-                .checked_mul(10u128.pow(decimals as u32))
-                .ok_or(Error::TooHighAmount)
-                .map(U128),
-        }
-    }
-
-    const fn deposit_action(&self) -> Action {
-        if self.decimals < META_MASK_DECIMALS {
-            Action::Increase(META_MASK_DECIMALS - self.decimals)
-        } else {
-            Action::Decrease(self.decimals - META_MASK_DECIMALS)
-        }
-    }
-
-    const fn withdraw_action(&self) -> Action {
-        if self.decimals > META_MASK_DECIMALS {
-            Action::Increase(self.decimals - META_MASK_DECIMALS)
-        } else {
-            Action::Decrease(META_MASK_DECIMALS - self.decimals)
-        }
-    }
 }
 
 #[near(serializers = [json])]
@@ -258,6 +254,41 @@ fn parse_message(msg: &str) -> Result<(AccountId, String), Error> {
             )
         })
         .ok_or(Error::WrongMessage)
+}
+
+fn modify_amount(amount: U128, action: Action) -> Result<U128, Error> {
+    match action {
+        Action::Decrease(decimals) => {
+            let amount = amount.0.saturating_div(10u128.pow(decimals as u32));
+
+            if amount == 0 {
+                return Err(Error::TooLowAmount);
+            }
+
+            Ok(U128(amount))
+        }
+        Action::Increase(decimals) => amount
+            .0
+            .checked_mul(10u128.pow(decimals as u32))
+            .ok_or(Error::TooHighAmount)
+            .map(U128),
+    }
+}
+
+const fn deposit_action(decimals: u8) -> Action {
+    if decimals < META_MASK_DECIMALS {
+        Action::Increase(META_MASK_DECIMALS - decimals)
+    } else {
+        Action::Decrease(decimals - META_MASK_DECIMALS)
+    }
+}
+
+const fn withdraw_action(decimals: u8) -> Action {
+    if decimals > META_MASK_DECIMALS {
+        Action::Increase(decimals - META_MASK_DECIMALS)
+    } else {
+        Action::Decrease(META_MASK_DECIMALS - decimals)
+    }
 }
 
 #[ext_contract(ext_ft)]
