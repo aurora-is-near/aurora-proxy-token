@@ -6,6 +6,9 @@ use near_sdk::{
 };
 use std::str::FromStr;
 
+#[cfg(test)]
+mod tests;
+
 const META_MASK_DECIMALS: u8 = 18;
 const GAS_FOR_FT_ON_TRANSFER: Gas = Gas::from_tgas(20);
 const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
@@ -202,14 +205,17 @@ impl AuroraProxyToken {
         match action {
             Action::Decrease(decimals) => {
                 let amount = amount.0.saturating_div(10u128.pow(decimals as u32));
-                require!(amount > 0, Error::TooLowDeposit.as_ref());
+
+                if amount == 0 {
+                    return Err(Error::TooLowAmount);
+                }
 
                 Ok(U128(amount))
             }
             Action::Increase(decimals) => amount
                 .0
                 .checked_mul(10u128.pow(decimals as u32))
-                .ok_or(Error::TooHighDeposit)
+                .ok_or(Error::TooHighAmount)
                 .map(U128),
         }
     }
@@ -271,9 +277,11 @@ pub trait FungibleToken {
         msg: String,
     ) -> PromiseOrValue<U128>;
 }
+
+#[derive(Debug)]
 enum Error {
-    TooLowDeposit,
-    TooHighDeposit,
+    TooLowAmount,
+    TooHighAmount,
     BadAccountId,
     WrongMessage,
 }
@@ -281,8 +289,8 @@ enum Error {
 impl AsRef<str> for Error {
     fn as_ref(&self) -> &str {
         match self {
-            Self::TooLowDeposit => "Deposit is too low",
-            Self::TooHighDeposit => "Deposit is too high",
+            Self::TooLowAmount => "Amount is too low",
+            Self::TooHighAmount => "Amount is too high",
             Self::BadAccountId => "Bad account_id",
             Self::WrongMessage => "Wrong message format",
         }
