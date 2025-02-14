@@ -1,0 +1,18 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: aurora-proxy-token
+  description: |-
+    Enables support for non-18 decimals base coins
+  tags:
+    - contract
+    - aurora
+  links: []
+  annotations:
+    aurora.dev/security-tier: "1"
+spec:
+  owner: engine-team
+  type: contract
+  lifecycle: production
+  deployedAt: []
+  interactsWith: []
