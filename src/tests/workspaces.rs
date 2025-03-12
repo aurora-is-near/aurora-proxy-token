@@ -13,7 +13,7 @@ async fn test_deposit_withdraw() -> anyhow::Result<()> {
         token,
         engine,
         proxy,
-    } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+    } = env(&sandbox, INIT_TOTAL_SUPPLY).await?;
 
     set_base_token(&engine, proxy.id()).await?;
     storage_deposit(&token, proxy.id()).await?;
@@ -73,7 +73,7 @@ async fn test_deposit_withdraw_service() -> anyhow::Result<()> {
         engine,
         proxy,
         ..
-    } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+    } = env(&sandbox, INIT_TOTAL_SUPPLY).await?;
     let service = sandbox
         .dev_deploy_tla(include_bytes!("../../res/mock-service.wasm"))
         .await
@@ -145,7 +145,7 @@ async fn test_deposit_withdraw_two_acc() -> anyhow::Result<()> {
         token,
         engine,
         proxy,
-    } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+    } = env(&sandbox, INIT_TOTAL_SUPPLY).await?;
 
     set_base_token(&engine, proxy.id()).await?;
     storage_deposit(&token, proxy.id()).await?;
@@ -213,7 +213,7 @@ async fn test_withdraw_to_account_without_storage_deposit() -> anyhow::Result<()
         token,
         engine,
         proxy,
-    } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+    } = env(&sandbox, INIT_TOTAL_SUPPLY).await?;
 
     set_base_token(&engine, proxy.id()).await?;
     storage_deposit(&token, proxy.id()).await?;
@@ -275,7 +275,7 @@ async fn test_attempt_to_deposit_more_tokens() -> anyhow::Result<()> {
         token,
         engine,
         proxy,
-    } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+    } = env(&sandbox, INIT_TOTAL_SUPPLY).await?;
 
     set_base_token(&engine, proxy.id()).await?;
     storage_deposit(&token, proxy.id()).await?;
@@ -302,9 +302,10 @@ async fn test_attempt_to_deposit_more_tokens() -> anyhow::Result<()> {
     .err()
     .unwrap();
 
-    assert!(err
-        .to_string()
-        .contains("Smart contract panicked: The account doesn't have enough balance"));
+    assert!(
+        err.to_string()
+            .contains("Smart contract panicked: The account doesn't have enough balance")
+    );
 
     let token_balance = balance(&token, token.id()).await?;
     assert_eq!(token_balance, U128(INIT_TOTAL_SUPPLY - amount.0));
@@ -329,7 +330,7 @@ async fn test_attempt_to_withdraw_more_tokens() -> anyhow::Result<()> {
         token,
         engine,
         proxy,
-    } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+    } = env(&sandbox, INIT_TOTAL_SUPPLY).await?;
 
     set_base_token(&engine, proxy.id()).await?;
     storage_deposit(&token, proxy.id()).await?;

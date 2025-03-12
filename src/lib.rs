@@ -1,10 +1,11 @@
-use near_plugins::{access_control, pause, AccessControlRole, AccessControllable, Pausable};
+use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
+use near_plugins::{AccessControlRole, AccessControllable, Pausable, access_control, pause};
 use near_sdk::borsh::BorshDeserialize;
 use near_sdk::json_types::U128;
 use near_sdk::serde_json;
 use near_sdk::{
-    env, ext_contract, log, near, require, AccountId, Gas, NearToken, PanicOnDefault,
-    PromiseOrValue, PromiseResult,
+    AccountId, Gas, NearToken, PanicOnDefault, PromiseOrValue, PromiseResult, env, ext_contract,
+    log, near, require,
 };
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -17,15 +18,22 @@ const GAS_FOR_FT_ON_TRANSFER: Gas = Gas::from_tgas(20);
 const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_FOR_FT_TRANSFER_CALL: Gas = Gas::from_tgas(50);
 const GAS_FOR_FT_RESOLVE: Gas = Gas::from_tgas(10);
+const GAS_FOR_FT_METADATA: Gas = Gas::from_tgas(5);
+const GAS_FOR_FINISH_INIT: Gas = Gas::from_tgas(100);
 
 #[derive(AccessControlRole, Serialize, Deserialize, Copy, Clone)]
 enum Role {
+    Controller,
     PauseManager,
+    UnpauseManager,
 }
 
 #[derive(Debug, PanicOnDefault, Pausable)]
 #[access_control(role_type(Role))]
-#[pausable(manager_roles(Role::PauseManager))]
+#[pausable(
+    pause_roles(Role::Controller, Role::PauseManager),
+    unpause_roles(Role::Controller, Role::UnpauseManager)
+)]
 #[near(contract_state)]
 pub struct AuroraProxyToken {
     token_id: AccountId,
@@ -34,21 +42,45 @@ pub struct AuroraProxyToken {
 
 #[near]
 impl AuroraProxyToken {
+    pub fn init(token_id: AccountId) -> near_sdk::Promise {
+        ext_ft::ext(token_id.clone())
+            .with_static_gas(GAS_FOR_FT_METADATA)
+            .ft_metadata()
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_attached_deposit(env::attached_deposit())
+                    .with_static_gas(GAS_FOR_FINISH_INIT)
+                    .finish_init(token_id),
+            )
+    }
+
     #[init]
+    #[private]
     #[allow(clippy::use_self)]
-    pub fn new(token_id: AccountId, decimals: u8) -> Self {
-        let mut contract = Self { token_id, decimals };
-        let current_account_id = env::current_account_id();
+    pub fn finish_init(
+        #[callback_unwrap] metadata: FungibleTokenMetadata,
+        token_id: AccountId,
+    ) -> Self {
+        let mut contract = Self {
+            token_id,
+            decimals: metadata.decimals,
+        };
 
         let mut acl = contract.acl_get_or_init();
 
         require!(
-            acl.add_super_admin_unchecked(&current_account_id),
-            "Failed to add super admin"
+            acl.grant_role_unchecked(Role::Controller, &env::predecessor_account_id()),
+            "Failed to grant Controller role"
         );
+
+        let current_account_id = env::current_account_id();
         require!(
             acl.grant_role_unchecked(Role::PauseManager, &current_account_id),
             "Failed to grant PauseManager role"
+        );
+        require!(
+            acl.grant_role_unchecked(Role::UnpauseManager, &current_account_id),
+            "Failed to grant UnpauseManager role"
         );
 
         contract
@@ -307,6 +339,7 @@ pub trait FungibleToken {
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128>;
+    fn ft_metadata(&mut self) -> FungibleTokenMetadata;
 }
 
 #[derive(Debug)]

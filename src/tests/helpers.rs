@@ -1,10 +1,10 @@
+use aurora_engine_types::U256;
 use aurora_engine_types::parameters::engine::{CallArgs, FunctionCallArgsV2};
 use aurora_engine_types::types::Address;
-use aurora_engine_types::U256;
 use near_sdk::json_types::U128;
 use near_sdk::{AccountId, NearToken};
 use near_workspaces::network::Sandbox;
-use near_workspaces::{compile_project, Account, Contract, Worker};
+use near_workspaces::{Account, Contract, Worker, compile_project};
 use serde_json::json;
 use tokio::sync::OnceCell;
 
@@ -22,15 +22,11 @@ pub struct Env {
     pub proxy: Contract,
 }
 
-pub async fn env(
-    sandbox: &Worker<Sandbox>,
-    init_supply: u128,
-    decimals: u8,
-) -> anyhow::Result<Env> {
+pub async fn env(sandbox: &Worker<Sandbox>, init_supply: u128) -> anyhow::Result<Env> {
     let user = sandbox.dev_create_account().await?;
     let token = deploy_fungible_token(sandbox, init_supply).await?;
     let engine = deploy_aurora(sandbox).await?;
-    let proxy = deploy_proxy(sandbox, token.id(), decimals).await?;
+    let proxy = deploy_proxy(sandbox, token.id()).await?;
 
     Ok(Env {
         user,
@@ -43,18 +39,18 @@ pub async fn env(
 pub async fn deploy_proxy(
     sandbox: &Worker<Sandbox>,
     token_id: &AccountId,
-    decimals: u8,
 ) -> anyhow::Result<Contract> {
     let contract_wasm = PROXY_CODE
         .get_or_init(|| async { compile_project(".").await.unwrap() })
         .await;
     let contract = sandbox.dev_deploy_tla(contract_wasm).await?;
     let result = contract
-        .call("new")
-        .args_json(json!({"token_id": token_id, "decimals": decimals}))
+        .call("init")
+        .args_json(json!({"token_id": token_id}))
+        .max_gas()
         .transact()
         .await?;
-    assert!(result.is_success(), "{result:?}");
+    assert!(result.is_success(), "{result:#?}");
 
     Ok(contract)
 }
