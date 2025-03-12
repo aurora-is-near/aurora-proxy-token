@@ -50,7 +50,7 @@ impl AuroraProxyToken {
                 Self::ext(env::current_account_id())
                     .with_attached_deposit(env::attached_deposit())
                     .with_static_gas(GAS_FOR_FINISH_INIT)
-                    .finish_init(token_id),
+                    .finish_init(env::predecessor_account_id(), token_id),
             )
     }
 
@@ -59,6 +59,7 @@ impl AuroraProxyToken {
     #[allow(clippy::use_self)]
     pub fn finish_init(
         #[callback_unwrap] metadata: FungibleTokenMetadata,
+        controller_id: AccountId,
         token_id: AccountId,
     ) -> Self {
         let mut contract = Self {
@@ -69,7 +70,12 @@ impl AuroraProxyToken {
         let mut acl = contract.acl_get_or_init();
 
         require!(
-            acl.grant_role_unchecked(Role::Controller, &env::predecessor_account_id()),
+            acl.add_super_admin_unchecked(&controller_id),
+            "Failed to init Super Admin role"
+        );
+
+        require!(
+            acl.grant_role_unchecked(Role::Controller, &controller_id),
             "Failed to grant Controller role"
         );
 
