@@ -1,0 +1,17 @@
+[package]
+name = "aurora-proxy-tests"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+aurora-engine-sdk.workspace = true
+aurora-engine-types.workspace = true
+near-sdk.workspace = true
+near-workspaces.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

@@ -2,51 +2,57 @@ use aurora_engine_types::U256;
 use aurora_engine_types::parameters::engine::{CallArgs, FunctionCallArgsV2};
 use aurora_engine_types::types::Address;
 use near_sdk::json_types::U128;
+use near_sdk::serde_json::json;
 use near_sdk::{AccountId, NearToken};
 use near_workspaces::network::Sandbox;
+use near_workspaces::types::{KeyType, SecretKey};
 use near_workspaces::{Account, Contract, Worker, compile_project};
-use serde_json::json;
 use tokio::sync::OnceCell;
 
-const FT_PATH: &str = "res/fungible-token.wasm";
-const AURORA_PATH: &str = "res/aurora-mainnet-silo-3.8.0.wasm";
+const FT_PATH: &str = "../res/fungible-token.wasm";
+const AURORA_PATH: &str = "../res/aurora-mainnet-silo-3.8.0.wasm";
 const EXIT_TO_NEAR_PRECOMPILE: &str = "e9217bc70b7ed1f598ddd3199e80b093fa71124f";
 const STORAGE_DEPOSIT: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
 
-static PROXY_CODE: OnceCell<Vec<u8>> = OnceCell::const_new();
+static FACTORY_CODE: OnceCell<Vec<u8>> = OnceCell::const_new();
 
 pub struct Env {
     pub user: Account,
     pub token: Contract,
     pub engine: Contract,
-    pub proxy: Contract,
+    pub factory: Contract,
 }
 
-pub async fn env(sandbox: &Worker<Sandbox>, init_supply: u128) -> anyhow::Result<Env> {
+pub async fn env(
+    sandbox: &Worker<Sandbox>,
+    init_supply: u128,
+    decimals: u8,
+) -> anyhow::Result<Env> {
     let user = sandbox.dev_create_account().await?;
-    let token = deploy_fungible_token(sandbox, init_supply).await?;
+    let token = deploy_fungible_token(sandbox, init_supply, decimals).await?;
     let engine = deploy_aurora(sandbox).await?;
-    let proxy = deploy_proxy(sandbox, token.id()).await?;
+    let factory = deploy_factory(sandbox).await?;
 
     Ok(Env {
         user,
         token,
         engine,
-        proxy,
+        factory,
     })
 }
 
-pub async fn deploy_proxy(
-    sandbox: &Worker<Sandbox>,
-    token_id: &AccountId,
-) -> anyhow::Result<Contract> {
-    let contract_wasm = PROXY_CODE
-        .get_or_init(|| async { compile_project(".").await.unwrap() })
+async fn deploy_factory(sandbox: &Worker<Sandbox>) -> anyhow::Result<Contract> {
+    let contract_wasm = FACTORY_CODE
+        .get_or_init(|| async { compile_project("../factory").await.unwrap() })
         .await;
-    let contract = sandbox.dev_deploy_tla(contract_wasm).await?;
+    let sk = SecretKey::from_random(KeyType::ED25519);
+    let contract = sandbox
+        .create_tla_and_deploy("factory".parse().unwrap(), sk, contract_wasm)
+        .await?
+        .result;
     let result = contract
-        .call("init")
-        .args_json(json!({"token_id": token_id}))
+        .call("new")
+        .args_json(json!({}))
         .max_gas()
         .transact()
         .await?;
@@ -58,6 +64,7 @@ pub async fn deploy_proxy(
 pub async fn deploy_fungible_token(
     sandbox: &Worker<Sandbox>,
     total_supply: u128,
+    decimals: u8,
 ) -> anyhow::Result<Contract> {
     let bytes = tokio::fs::read(FT_PATH).await?;
     let contract = sandbox.dev_deploy_tla(&bytes).await?;
@@ -71,7 +78,7 @@ pub async fn deploy_fungible_token(
                 "spec": "ft-1.0.0",
                 "name": "Token",
                 "symbol": "TKN",
-                "decimals": 6
+                "decimals": decimals
             }
         }))
         .max_gas()
