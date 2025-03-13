@@ -9,6 +9,7 @@ TARGET_DIR = "${PWD}/res"
 alias = "build"
 
 [tasks.clippy]
+dependencies = ["build-proxy-token"]
 command = "cargo"
 args = ["clippy", "--workspace", "--all-targets"]
 
