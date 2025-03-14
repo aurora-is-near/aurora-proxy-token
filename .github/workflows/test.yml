@@ -1,26 +1,33 @@
-name: Test
+name: Tests
 on:
-  workflow_call:
+  pull_request:
 
 jobs:
-  code-formatting:
+  formatting:
     name: Code Formatting
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - run: cargo fmt --check
+      - name: Install dependencies
+        run: cargo install cargo-make
+      - run: cargo make fmt
 
-  code-linter:
+  linter:
     name: Code Linter
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Install Libudev
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: libudev-dev
+          version: 1.0
+      - name: Install dependencies
+        run: cargo install cargo-make cargo-near
       - name: Run cargo clippy
-        run: |
-          rustup component add clippy
-          cargo clippy --all-features --workspace --tests -- --warn clippy::all --warn clippy::nursery
+        run: cargo make clippy
 
   tests:
     name: Tests
@@ -28,5 +35,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Install Libudev
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: libudev-dev
+          version: 1.0
+      - name: Install dependencies
+        run: cargo install cargo-make cargo-near
       - name: Run cargo test
-        run: cargo test
+        run: cargo make test

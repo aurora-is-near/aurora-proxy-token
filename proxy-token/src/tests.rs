@@ -1,4 +1,4 @@
-use crate::{deposit_action, modify_amount, withdraw_action, Error};
+use crate::{Error, deposit_action, modify_amount, withdraw_action};
 
 #[test]
 fn test_modify_amount_deposit() {

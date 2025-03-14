@@ -7,7 +7,6 @@ use near_sdk::{
     AccountId, Gas, NearToken, PanicOnDefault, PromiseOrValue, PromiseResult, env, ext_contract,
     log, near, require,
 };
-use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 #[cfg(test)]
@@ -21,7 +20,8 @@ const GAS_FOR_FT_RESOLVE: Gas = Gas::from_tgas(10);
 const GAS_FOR_FT_METADATA: Gas = Gas::from_tgas(5);
 const GAS_FOR_FINISH_INIT: Gas = Gas::from_tgas(100);
 
-#[derive(AccessControlRole, Serialize, Deserialize, Copy, Clone)]
+#[derive(AccessControlRole, Copy, Clone)]
+#[near(serializers = [json])]
 enum Role {
     Controller,
     PauseManager,
@@ -42,6 +42,8 @@ pub struct AuroraProxyToken {
 
 #[near]
 impl AuroraProxyToken {
+    /// Initializes the contract with the given NEP-141 token ID.
+    #[must_use]
     pub fn init(token_id: AccountId) -> near_sdk::Promise {
         ext_ft::ext(token_id.clone())
             .with_static_gas(GAS_FOR_FT_METADATA)
@@ -50,16 +52,17 @@ impl AuroraProxyToken {
                 Self::ext(env::current_account_id())
                     .with_attached_deposit(env::attached_deposit())
                     .with_static_gas(GAS_FOR_FINISH_INIT)
-                    .finish_init(env::predecessor_account_id(), token_id),
+                    .finish_init(&env::predecessor_account_id(), token_id),
             )
     }
 
     #[init]
     #[private]
+    #[must_use]
     #[allow(clippy::use_self)]
     pub fn finish_init(
-        #[callback_unwrap] metadata: FungibleTokenMetadata,
-        controller_id: AccountId,
+        #[callback_unwrap] metadata: &FungibleTokenMetadata,
+        controller_id: &AccountId,
         token_id: AccountId,
     ) -> Self {
         let mut contract = Self {
@@ -70,12 +73,12 @@ impl AuroraProxyToken {
         let mut acl = contract.acl_get_or_init();
 
         require!(
-            acl.add_super_admin_unchecked(&controller_id),
+            acl.add_super_admin_unchecked(controller_id),
             "Failed to init Super Admin role"
         );
 
         require!(
-            acl.grant_role_unchecked(Role::Controller, &controller_id),
+            acl.grant_role_unchecked(Role::Controller, controller_id),
             "Failed to grant Controller role"
         );
 
@@ -92,10 +95,14 @@ impl AuroraProxyToken {
         contract
     }
 
+    /// Returns the NEP-141 token ID.
+    #[must_use]
     pub fn get_token_id(&self) -> AccountId {
         self.token_id.clone()
     }
 
+    /// Returns the number of decimals of the NEP-141 token.
+    #[must_use]
     pub const fn get_decimals(&self) -> u8 {
         self.decimals
     }
@@ -155,8 +162,8 @@ impl AuroraProxyToken {
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_FOR_FT_RESOLVE)
                     .ft_resolve_withdraw(
-                        env::current_account_id(),
-                        receiver_id,
+                        &env::current_account_id(),
+                        &receiver_id,
                         amount,
                         !msg.is_empty(),
                     ),
@@ -195,7 +202,7 @@ impl AuroraProxyToken {
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_FOR_FT_RESOLVE)
-                    .ft_resolve_deposit(env::current_account_id(), engine_id, amount),
+                    .ft_resolve_deposit(&env::current_account_id(), &engine_id, amount),
             )
             .into()
     }
@@ -203,8 +210,8 @@ impl AuroraProxyToken {
     #[private]
     pub fn ft_resolve_withdraw(
         &mut self,
-        sender_id: AccountId,
-        receiver_id: AccountId,
+        sender_id: &AccountId,
+        receiver_id: &AccountId,
         amount: U128,
         is_call: bool,
     ) -> U128 {
@@ -248,8 +255,8 @@ impl AuroraProxyToken {
     #[private]
     pub fn ft_resolve_deposit(
         &mut self,
-        sender_id: AccountId,
-        receiver_id: AccountId,
+        sender_id: &AccountId,
+        receiver_id: &AccountId,
         amount: U128,
     ) -> U128 {
         log!(
@@ -277,6 +284,7 @@ struct Message {
     memo: Option<String>,
 }
 
+#[derive(Clone, Copy)]
 enum Action {
     Decrease(u8),
     Increase(u8),
@@ -297,7 +305,7 @@ fn parse_message(msg: &str) -> Result<(AccountId, String), Error> {
 fn modify_amount(amount: U128, action: Action) -> Result<U128, Error> {
     match action {
         Action::Decrease(decimals) => {
-            let amount = amount.0.saturating_div(10u128.pow(decimals as u32));
+            let amount = amount.0.saturating_div(10u128.pow(u32::from(decimals)));
 
             if amount == 0 {
                 return Err(Error::TooLowAmount);
@@ -307,7 +315,7 @@ fn modify_amount(amount: U128, action: Action) -> Result<U128, Error> {
         }
         Action::Increase(decimals) => amount
             .0
-            .checked_mul(10u128.pow(decimals as u32))
+            .checked_mul(10u128.pow(u32::from(decimals)))
             .ok_or(Error::TooHighAmount)
             .map(U128),
     }
