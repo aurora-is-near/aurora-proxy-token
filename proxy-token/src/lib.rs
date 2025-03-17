@@ -1,4 +1,3 @@
-use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_plugins::{AccessControlRole, AccessControllable, Pausable, access_control, pause};
 use near_sdk::borsh::BorshDeserialize;
 use near_sdk::json_types::U128;
@@ -17,8 +16,6 @@ const GAS_FOR_FT_ON_TRANSFER: Gas = Gas::from_tgas(20);
 const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_FOR_FT_TRANSFER_CALL: Gas = Gas::from_tgas(50);
 const GAS_FOR_FT_RESOLVE: Gas = Gas::from_tgas(10);
-const GAS_FOR_FT_METADATA: Gas = Gas::from_tgas(5);
-const GAS_FOR_FINISH_INIT: Gas = Gas::from_tgas(100);
 
 #[derive(AccessControlRole, Copy, Clone)]
 #[near(serializers = [json])]
@@ -43,42 +40,22 @@ pub struct AuroraProxyToken {
 #[near]
 impl AuroraProxyToken {
     /// Initializes the contract with the given NEP-141 token ID.
-    #[must_use]
-    pub fn init(token_id: AccountId) -> near_sdk::Promise {
-        ext_ft::ext(token_id.clone())
-            .with_static_gas(GAS_FOR_FT_METADATA)
-            .ft_metadata()
-            .then(
-                Self::ext(env::current_account_id())
-                    .with_attached_deposit(env::attached_deposit())
-                    .with_static_gas(GAS_FOR_FINISH_INIT)
-                    .finish_init(&env::predecessor_account_id(), token_id),
-            )
-    }
-
     #[init]
-    #[private]
     #[must_use]
     #[allow(clippy::use_self)]
-    pub fn finish_init(
-        #[callback_unwrap] metadata: &FungibleTokenMetadata,
-        controller_id: &AccountId,
-        token_id: AccountId,
-    ) -> Self {
-        let mut contract = Self {
-            token_id,
-            decimals: metadata.decimals,
-        };
+    pub fn init(token_id: AccountId, decimals: u8) -> Self {
+        let mut contract = Self { token_id, decimals };
 
         let mut acl = contract.acl_get_or_init();
+        let controller_id = env::predecessor_account_id();
 
         require!(
-            acl.add_super_admin_unchecked(controller_id),
+            acl.add_super_admin_unchecked(&controller_id),
             "Failed to init Super Admin role"
         );
 
         require!(
-            acl.grant_role_unchecked(Role::Controller, controller_id),
+            acl.grant_role_unchecked(Role::Controller, &controller_id),
             "Failed to grant Controller role"
         );
 
@@ -353,7 +330,6 @@ pub trait FungibleToken {
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128>;
-    fn ft_metadata(&mut self) -> FungibleTokenMetadata;
 }
 
 #[derive(Debug)]

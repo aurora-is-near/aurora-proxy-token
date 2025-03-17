@@ -1,15 +1,20 @@
+use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_plugins::{
     AccessControlRole, AccessControllable, Pausable, Upgradable, access_control, pause,
 };
 use near_sdk::borsh::BorshDeserialize;
 use near_sdk::serde_json::json;
 use near_sdk::store::IterableMap;
-use near_sdk::{AccountId, Gas, NearToken, PanicOnDefault, Promise, env, log, near, require};
+use near_sdk::{
+    AccountId, Gas, NearToken, PanicOnDefault, Promise, env, ext_contract, log, near, require,
+};
 
 const PROXY_TOKEN_WASM: &[u8] = include_bytes!("../../res/aurora_proxy_token.wasm");
 const MIN_DEPLOY_DEPOSIT: NearToken = NearToken::from_near(3);
-const FINISH_DEPLOY_GAS: Gas = Gas::from_tgas(5);
-const PROXY_TOKEN_GAS: Gas = Gas::from_tgas(120);
+const REGISTER_TOKEN_GAS: Gas = Gas::from_tgas(5);
+const FINISH_DEPLOY_GAS: Gas = Gas::from_tgas(120);
+const PROXY_TOKEN_GAS: Gas = Gas::from_tgas(100);
+const FT_METADATA_GAS: Gas = Gas::from_tgas(5);
 
 #[derive(AccessControlRole, Clone, Copy)]
 #[near(serializers = [json])]
@@ -73,6 +78,25 @@ impl AuroraProxyFactory {
             "Not enough attached deposit to deploy proxy token"
         );
 
+        ext_ft::ext(token_id.clone())
+            .with_static_gas(FT_METADATA_GAS)
+            .ft_metadata()
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_attached_deposit(env::attached_deposit())
+                    .with_static_gas(FINISH_DEPLOY_GAS)
+                    .finish_deploy_token(token_id),
+            )
+    }
+
+    #[payable]
+    #[private]
+    pub fn finish_deploy_token(
+        &mut self,
+        #[callback_unwrap] metadata: &FungibleTokenMetadata,
+        token_id: AccountId,
+    ) -> Promise {
+        // TODO: Should we continue if the number of decimals is 18???
         let proxy_token_id = generate_proxy_token_id(&token_id);
 
         Promise::new(proxy_token_id.clone())
@@ -83,7 +107,8 @@ impl AuroraProxyFactory {
             .function_call(
                 "init".to_string(),
                 json!({
-                    "token_id": token_id
+                    "token_id": token_id,
+                    "decimals": metadata.decimals
                 })
                 .to_string()
                 .into_bytes(),
@@ -92,13 +117,13 @@ impl AuroraProxyFactory {
             )
             .then(
                 Self::ext(env::current_account_id())
-                    .with_static_gas(FINISH_DEPLOY_GAS)
-                    .finish_deploy_token(token_id, proxy_token_id),
+                    .with_static_gas(REGISTER_TOKEN_GAS)
+                    .register_deployed_token(token_id, proxy_token_id),
             )
     }
 
     #[private]
-    pub fn finish_deploy_token(
+    pub fn register_deployed_token(
         &mut self,
         token_id: AccountId,
         proxy_token_id: AccountId,
@@ -131,6 +156,11 @@ fn generate_proxy_token_id(token_id: &AccountId) -> AccountId {
     format!("{prefix}.{}", env::current_account_id())
         .parse()
         .unwrap()
+}
+
+#[ext_contract(ext_ft)]
+pub trait FungibleToken {
+    fn ft_metadata(&mut self) -> FungibleTokenMetadata;
 }
 
 #[test]
