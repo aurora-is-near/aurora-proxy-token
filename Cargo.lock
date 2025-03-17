@@ -142,7 +142,7 @@ dependencies = [
 
 [[package]]
 name = "aurora-proxy-factory"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "near-contract-standards",
  "near-plugins",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "aurora-proxy-tests"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "aurora-engine-sdk",
@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "aurora-proxy-token"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "near-plugins",
  "near-sdk",
