@@ -17,7 +17,6 @@ container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "-
 [dependencies]
 near-plugins.workspace = true
 near-sdk.workspace = true
-near-contract-standards.workspace = true
 
 [lints]
 workspace = true
