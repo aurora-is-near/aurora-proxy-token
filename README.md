@@ -29,8 +29,9 @@ cargo make test
 pub fn new(dao: Option<AccountId>) -> Self;
 
 /// Deploys a proxy token contract for the given NEP-141 token.
-#[payable]
 #[pause]
+#[payable]
+#[access_control_any(roles(Role::Controller))]
 pub fn deploy_token(&mut self, token_id: AccountId) -> AccountId;
 
 /// Returns the proxy token contract ID for the given NEP-141 token.
