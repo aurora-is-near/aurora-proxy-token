@@ -541,5 +541,38 @@ async fn test_deploy_wrong_token() -> anyhow::Result<()> {
         .await?;
     assert!(result.is_failure());
 
+    let err_msg = result.into_result().err().unwrap().to_string();
+    assert!(
+        // The computation was not successful because we couldn't get the metadata from non-NEP-141.
+        err_msg.contains("Smart contract panicked: Callback computation 0 was not successful"),
+        "{err_msg}",
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_deploy_by_not_controller() -> anyhow::Result<()> {
+    let sandbox = near_workspaces::sandbox().await?;
+    let alice = sandbox.dev_create_account().await?;
+    let Env { token, factory, .. } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+
+    let result = alice
+        .call(factory.id(), "deploy_token")
+        .args_json(json!({"token_id": token.id()}))
+        .deposit(NearToken::from_near(3))
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(result.is_failure());
+
+    let err_msg = result.into_result().err().unwrap().to_string();
+    assert!(
+        err_msg.contains(
+            "Insufficient permissions for method deploy_token restricted by access control"
+        ),
+        "{err_msg}"
+    );
+
     Ok(())
 }

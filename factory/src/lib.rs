@@ -1,6 +1,7 @@
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_plugins::{
-    AccessControlRole, AccessControllable, Pausable, Upgradable, access_control, pause,
+    AccessControlRole, AccessControllable, Pausable, Upgradable, access_control,
+    access_control_any, pause,
 };
 use near_sdk::borsh::BorshDeserialize;
 use near_sdk::serde_json::json;
@@ -23,6 +24,7 @@ enum Role {
     Deployer,
     PauseManager,
     UnpauseManager,
+    Controller,
 }
 
 #[derive(PanicOnDefault, Pausable, Upgradable)]
@@ -56,6 +58,12 @@ impl AuroraProxyFactory {
             "Failed to init Super Admin role"
         );
 
+        require!(
+            contract.acl_grant_role(Role::Controller.into(), env::predecessor_account_id())
+                == Some(true),
+            "Failed to grant Controller role"
+        );
+
         // Optionally grant `Role::DAO`.
         if let Some(account_id) = dao {
             let res = contract.acl_grant_role(Role::Dao.into(), account_id);
@@ -66,8 +74,9 @@ impl AuroraProxyFactory {
     }
 
     /// Deploys a proxy token contract for the given NEP-141 token.
-    #[payable]
     #[pause]
+    #[payable]
+    #[access_control_any(roles(Role::Controller))]
     pub fn deploy_token(&mut self, token_id: AccountId) -> Promise {
         require!(
             !self.deployed_tokens.contains_key(&token_id),
