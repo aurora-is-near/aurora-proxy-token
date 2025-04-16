@@ -165,6 +165,7 @@ dependencies = [
 name = "aurora-proxy-token"
 version = "0.1.2"
 dependencies = [
+ "near-contract-standards",
  "near-plugins",
  "near-sdk",
 ]

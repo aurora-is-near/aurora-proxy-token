@@ -5,14 +5,15 @@ use near_sdk::json_types::U128;
 use near_sdk::serde_json::json;
 use near_sdk::{AccountId, NearToken};
 use near_workspaces::network::Sandbox;
+use near_workspaces::result::ExecutionFinalResult;
 use near_workspaces::types::{KeyType, SecretKey};
 use near_workspaces::{Account, Contract, Worker, compile_project};
 use tokio::sync::OnceCell;
 
 const FT_PATH: &str = "../res/fungible-token.wasm";
-const AURORA_PATH: &str = "../res/aurora-mainnet-silo-3.8.0.wasm";
+const AURORA_PATH: &str = "../res/aurora-mainnet-silo-3.9.0.wasm";
 const EXIT_TO_NEAR_PRECOMPILE: &str = "e9217bc70b7ed1f598ddd3199e80b093fa71124f";
-const STORAGE_DEPOSIT: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
+pub const STORAGE_DEPOSIT: NearToken = NearToken::from_yoctonear(1_250_000_000_000_000_000_000);
 
 static FACTORY_CODE: OnceCell<Vec<u8>> = OnceCell::const_new();
 
@@ -138,6 +139,22 @@ pub async fn storage_deposit(token: &Contract, account_id: &AccountId) -> anyhow
         .await?;
     assert!(result.is_success());
     Ok(())
+}
+
+pub async fn storage_deposit_via_proxy(
+    user: &Account,
+    proxy_account_id: &AccountId,
+) -> anyhow::Result<ExecutionFinalResult> {
+    let result = user
+        .call(proxy_account_id, "storage_deposit")
+        .args_json(json!({"account_id": user.id() }))
+        .deposit(STORAGE_DEPOSIT)
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(result.is_success());
+
+    Ok(result)
 }
 
 pub async fn balance(token: &Contract, account_id: &AccountId) -> anyhow::Result<U128> {

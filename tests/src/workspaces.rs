@@ -576,3 +576,189 @@ async fn test_deploy_by_not_controller() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_storage_deposit_via_proxy() -> anyhow::Result<()> {
+    let sandbox = near_workspaces::sandbox().await?;
+    let Env {
+        user,
+        token,
+        engine,
+        factory,
+    } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+
+    let proxy_id = factory.deploy_token(token.id()).await?;
+    set_base_token(&engine, &proxy_id).await?;
+    storage_deposit(&token, &proxy_id).await?;
+
+    let balance_before = user.view_account().await?.balance;
+    let result = storage_deposit_via_proxy(&user, &proxy_id).await?;
+    let total_spend = result
+        .outcomes()
+        .iter()
+        .fold(0u128, |total, o| total + o.tokens_burnt.as_yoctonear());
+
+    sandbox.fast_forward(1).await?; // wait for refund tokens for unused gas
+
+    let balance_after = user.view_account().await?.balance;
+    assert_eq!(
+        balance_before.as_yoctonear(),
+        balance_after
+            .checked_add(STORAGE_DEPOSIT)
+            .as_ref()
+            .map(|r| r.as_yoctonear() + total_spend)
+            .unwrap()
+    );
+
+    let deposit = U128(1000);
+    transfer(&token, user.id(), deposit).await?;
+
+    let user_balance = balance(&token, user.id()).await?;
+    assert_eq!(user_balance, deposit);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_double_storage_deposit_refund() -> anyhow::Result<()> {
+    let sandbox = near_workspaces::sandbox().await?;
+    let Env {
+        user,
+        token,
+        engine,
+        factory,
+    } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+
+    let proxy_id = factory.deploy_token(token.id()).await?;
+    set_base_token(&engine, &proxy_id).await?;
+    storage_deposit(&token, &proxy_id).await?;
+
+    let balance_before = user.view_account().await?.balance;
+
+    let result = storage_deposit_via_proxy(&user, &proxy_id).await?;
+    let total_spend = result
+        .outcomes()
+        .iter()
+        .fold(0u128, |total, o| total + o.tokens_burnt.as_yoctonear());
+
+    sandbox.fast_forward(1).await?; // wait for refund tokens for unused gas
+
+    let balance_after = user.view_account().await?.balance;
+    assert_eq!(
+        balance_before.as_yoctonear(),
+        balance_after
+            .checked_add(STORAGE_DEPOSIT)
+            .as_ref()
+            .map(|r| r.as_yoctonear() + total_spend)
+            .unwrap()
+    );
+
+    // Second storage deposit should be failed and refunded
+    let balance_before = user.view_account().await?.balance;
+    let result = storage_deposit_via_proxy(&user, &proxy_id).await?;
+    let total_spend = result
+        .outcomes()
+        .iter()
+        .fold(0u128, |total, o| total + o.tokens_burnt.as_yoctonear());
+
+    sandbox.fast_forward(1).await?; // wait for refund tokens for unused gas
+
+    let balance_after = user.view_account().await?.balance;
+    assert_eq!(
+        balance_before.as_yoctonear(),
+        balance_after.as_yoctonear() + total_spend
+    );
+
+    let deposit = U128(1000);
+    transfer(&token, user.id(), deposit).await?;
+
+    let user_balance = balance(&token, user.id()).await?;
+    assert_eq!(user_balance, deposit);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_storage_deposit_less() -> anyhow::Result<()> {
+    let sandbox = near_workspaces::sandbox().await?;
+    let Env {
+        user,
+        token,
+        engine,
+        factory,
+    } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+
+    let proxy_id = factory.deploy_token(token.id()).await?;
+    set_base_token(&engine, &proxy_id).await?;
+
+    let balance_before = user.view_account().await?.balance;
+
+    let result = user
+        .call(&proxy_id, "storage_deposit")
+        .args_json(json!({"account_id": user.id() }))
+        .deposit(STORAGE_DEPOSIT.saturating_div(2))
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(result.is_success());
+    let total_spend = result
+        .outcomes()
+        .iter()
+        .fold(0u128, |total, o| total + o.tokens_burnt.as_yoctonear());
+
+    sandbox.fast_forward(1).await?; // wait for refund tokens for unused gas
+
+    let balance_after = user.view_account().await?.balance;
+    // We don't need to subtract the STORAGE_DEPOSIT because we deposited less than needed,
+    // so refund has happened. We subtract the spending for transaction only.
+    assert_eq!(
+        balance_before.as_yoctonear() - total_spend,
+        balance_after.as_yoctonear()
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_storage_deposit_more() -> anyhow::Result<()> {
+    let sandbox = near_workspaces::sandbox().await?;
+    let Env {
+        user,
+        token,
+        engine,
+        factory,
+    } = env(&sandbox, INIT_TOTAL_SUPPLY, 6).await?;
+
+    let proxy_id = factory.deploy_token(token.id()).await?;
+    set_base_token(&engine, &proxy_id).await?;
+
+    let balance_before = user.view_account().await?.balance;
+
+    let result = user
+        .call(&proxy_id, "storage_deposit")
+        .args_json(json!({"account_id": user.id() }))
+        .deposit(STORAGE_DEPOSIT.saturating_mul(2))
+        .max_gas()
+        .transact()
+        .await?;
+    assert!(result.is_success());
+    let total_spend = result
+        .outcomes()
+        .iter()
+        .fold(0u128, |total, o| total + o.tokens_burnt.as_yoctonear());
+
+    sandbox.fast_forward(1).await?; // wait for refund tokens for unused gas
+
+    let balance_after = user.view_account().await?.balance;
+    // We tried to deposit 2 x STORAGE_DEPOSIT, but subtract only ONE here, because the another
+    // should be refunded.
+    assert_eq!(
+        balance_before
+            .saturating_sub(STORAGE_DEPOSIT)
+            .as_yoctonear()
+            - total_spend,
+        balance_after.as_yoctonear()
+    );
+
+    Ok(())
+}
