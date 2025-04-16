@@ -17,7 +17,8 @@ const GAS_FOR_FT_ON_TRANSFER: Gas = Gas::from_tgas(20);
 const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_FOR_FT_TRANSFER_CALL: Gas = Gas::from_tgas(50);
 const GAS_FOR_FT_RESOLVE: Gas = Gas::from_tgas(10);
-const GAS_FOR_STORAGE_BALANCE: Gas = Gas::from_tgas(1);
+const GAS_FOR_STORAGE_BALANCE_OF: Gas = Gas::from_tgas(1);
+const GAS_FOR_STORAGE_BALANCE_BOUNDS: Gas = Gas::from_tgas(1);
 const GAS_FOR_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
 const GAS_FOR_FINISH_STORAGE_DEPOSIT: Gas = Gas::from_tgas(30);
 
@@ -198,11 +199,11 @@ impl AuroraProxyToken {
         log!("storage_deposit for {}", account_id);
 
         ext_sm::ext(self.token_id.clone())
-            .with_static_gas(GAS_FOR_STORAGE_BALANCE)
+            .with_static_gas(GAS_FOR_STORAGE_BALANCE_OF)
             .storage_balance_bounds()
             .and(
                 ext_sm::ext(self.token_id.clone())
-                    .with_static_gas(GAS_FOR_STORAGE_BALANCE)
+                    .with_static_gas(GAS_FOR_STORAGE_BALANCE_BOUNDS)
                     .storage_balance_of(account_id.clone()),
             )
             .then(
@@ -245,7 +246,7 @@ impl AuroraProxyToken {
                     log!("Sending storage deposit");
                     ext_sm::ext(self.token_id.clone())
                         .with_static_gas(GAS_FOR_STORAGE_DEPOSIT)
-                        .with_attached_deposit(attached_deposit)
+                        .with_attached_deposit(bounds.min)
                         .storage_deposit(account_id, registration_only)
                 }
             }
