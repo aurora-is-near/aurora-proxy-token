@@ -218,8 +218,8 @@ impl AuroraProxyToken {
     #[private]
     pub fn finish_storage_deposit(
         &mut self,
-        #[callback_unwrap] bounds: StorageBalanceBounds,
-        #[callback_unwrap] balance: Option<StorageBalance>,
+        #[callback_unwrap] bounds: &StorageBalanceBounds,
+        #[callback_unwrap] balance: &Option<StorageBalance>,
         account_id: AccountId,
         registration_only: Option<bool>,
     ) -> PromiseOrValue<StorageBalance> {
