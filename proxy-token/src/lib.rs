@@ -17,8 +17,8 @@ const GAS_FOR_FT_ON_TRANSFER: Gas = Gas::from_tgas(20);
 const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_FOR_FT_TRANSFER_CALL: Gas = Gas::from_tgas(50);
 const GAS_FOR_FT_RESOLVE: Gas = Gas::from_tgas(10);
-const GAS_FOR_STORAGE_BALANCE_OF: Gas = Gas::from_tgas(1);
-const GAS_FOR_STORAGE_BALANCE_BOUNDS: Gas = Gas::from_tgas(1);
+const GAS_FOR_STORAGE_BALANCE_OF: Gas = Gas::from_tgas(2);
+const GAS_FOR_STORAGE_BALANCE_BOUNDS: Gas = Gas::from_tgas(2);
 const GAS_FOR_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
 const GAS_FOR_FINISH_STORAGE_DEPOSIT: Gas = Gas::from_tgas(30);
 
