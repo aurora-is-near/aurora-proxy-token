@@ -1,11 +1,12 @@
+use near_contract_standards::storage_management::{StorageBalance, StorageBalanceBounds};
 use near_plugins::{AccessControlRole, AccessControllable, Pausable, access_control, pause};
 use near_sdk::borsh::BorshDeserialize;
 use near_sdk::json_types::U128;
-use near_sdk::serde_json;
 use near_sdk::{
     AccountId, Gas, NearToken, PanicOnDefault, PromiseOrValue, PromiseResult, env, ext_contract,
     log, near, require,
 };
+use near_sdk::{Promise, serde_json};
 use std::str::FromStr;
 
 #[cfg(test)]
@@ -16,6 +17,10 @@ const GAS_FOR_FT_ON_TRANSFER: Gas = Gas::from_tgas(20);
 const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_FOR_FT_TRANSFER_CALL: Gas = Gas::from_tgas(50);
 const GAS_FOR_FT_RESOLVE: Gas = Gas::from_tgas(10);
+const GAS_FOR_STORAGE_BALANCE_OF: Gas = Gas::from_tgas(2);
+const GAS_FOR_STORAGE_BALANCE_BOUNDS: Gas = Gas::from_tgas(2);
+const GAS_FOR_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
+const GAS_FOR_FINISH_STORAGE_DEPOSIT: Gas = Gas::from_tgas(30);
 
 #[derive(AccessControlRole, Copy, Clone)]
 #[near(serializers = [json])]
@@ -125,7 +130,7 @@ impl AuroraProxyToken {
                 &msg
             );
 
-            let Message { msg, memo } = serde_json::from_str(&msg)
+            let Message { msg, memo } = serde_json::from_str(msg)
                 .unwrap_or_else(|_| env::panic_str(&format!("Wrong message format: {msg}")));
 
             ext_ft::ext(self.token_id.clone())
@@ -175,13 +180,78 @@ impl AuroraProxyToken {
 
         ext_ft::ext(engine_id.clone())
             .with_static_gas(GAS_FOR_FT_ON_TRANSFER)
-            .ft_on_transfer(sender_id, amount, evm_receiver)
+            .ft_on_transfer(sender_id, amount, evm_receiver.to_string())
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_FOR_FT_RESOLVE)
                     .ft_resolve_deposit(&env::current_account_id(), &engine_id, amount),
             )
             .into()
+    }
+
+    #[pause]
+    #[payable]
+    pub fn storage_deposit(
+        &mut self,
+        account_id: AccountId,
+        registration_only: Option<bool>,
+    ) -> PromiseOrValue<StorageBalance> {
+        log!("storage_deposit for {}", account_id);
+
+        ext_sm::ext(self.token_id.clone())
+            .with_static_gas(GAS_FOR_STORAGE_BALANCE_OF)
+            .storage_balance_bounds()
+            .and(
+                ext_sm::ext(self.token_id.clone())
+                    .with_static_gas(GAS_FOR_STORAGE_BALANCE_BOUNDS)
+                    .storage_balance_of(account_id.clone()),
+            )
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_FINISH_STORAGE_DEPOSIT)
+                    .with_attached_deposit(env::attached_deposit())
+                    .finish_storage_deposit(account_id, registration_only),
+            )
+            .into()
+    }
+
+    #[payable]
+    #[private]
+    pub fn finish_storage_deposit(
+        &mut self,
+        #[callback_unwrap] bounds: &StorageBalanceBounds,
+        #[callback_unwrap] balance: &Option<StorageBalance>,
+        account_id: AccountId,
+        registration_only: Option<bool>,
+    ) -> PromiseOrValue<StorageBalance> {
+        let attached_deposit = env::attached_deposit();
+
+        match balance {
+            Some(_) => {
+                log!("Already registered, refunding the deposit");
+                Promise::new(account_id).transfer(attached_deposit)
+            }
+            None => {
+                if attached_deposit < bounds.min {
+                    log!(
+                        "storage_deposit failed for {account_id}: attached deposit is less than min"
+                    );
+                    Promise::new(account_id).transfer(attached_deposit)
+                } else {
+                    let refund = attached_deposit.saturating_sub(bounds.min);
+                    if refund > NearToken::from_near(0) {
+                        Promise::new(account_id.clone()).transfer(refund);
+                    }
+
+                    log!("Sending storage deposit");
+                    ext_sm::ext(self.token_id.clone())
+                        .with_static_gas(GAS_FOR_STORAGE_DEPOSIT)
+                        .with_attached_deposit(bounds.min)
+                        .storage_deposit(account_id, registration_only)
+                }
+            }
+        }
+        .into()
     }
 
     #[private]
@@ -218,7 +288,7 @@ impl AuroraProxyToken {
                 if is_call {
                     // do not refund on failed `ft_transfer_call` due to
                     // NEP-141 vulnerability: `ft_resolve_transfer` fails to
-                    // read result of `ft_on_transfer` due to insufficient gas
+                    // read a result of `ft_on_transfer` due to insufficient gas
                     amount.0
                 } else {
                     0
@@ -267,13 +337,13 @@ enum Action {
     Increase(u8),
 }
 
-fn parse_message(msg: &str) -> Result<(AccountId, String), Error> {
+fn parse_message(msg: &str) -> Result<(AccountId, &str), Error> {
     msg.split_once(':')
         .map(|(acc, msg)| {
             (
                 AccountId::from_str(acc)
                     .unwrap_or_else(|_| env::panic_str(Error::BadAccountId.as_ref())),
-                msg.to_string(),
+                msg,
             )
         })
         .ok_or(Error::WrongMessage)
@@ -330,6 +400,17 @@ pub trait FungibleToken {
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128>;
+}
+
+#[ext_contract(ext_sm)]
+pub trait StorageManagement {
+    fn storage_deposit(
+        &mut self,
+        account_id: AccountId,
+        registration_only: Option<bool>,
+    ) -> StorageBalance;
+    fn storage_balance_of(&self, account_id: AccountId) -> Option<StorageBalance>;
+    fn storage_balance_bounds(&self) -> StorageBalanceBounds;
 }
 
 #[derive(Debug)]
