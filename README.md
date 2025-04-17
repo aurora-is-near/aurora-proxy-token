@@ -66,4 +66,11 @@ pub fn ft_on_transfer(
     amount: U128,
     msg: String,
 ) -> PromiseOrValue<U128>;
+
+/// Proxy `storage_deposit` method for the NEP-141 token.
+fn storage_deposit(
+    &mut self,
+    account_id: AccountId,
+    registration_only: Option<bool>,
+) -> StorageBalance;
 ```
