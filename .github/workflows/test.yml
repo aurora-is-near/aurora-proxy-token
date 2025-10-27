@@ -5,7 +5,7 @@ on:
 jobs:
   formatting:
     name: Code Formatting
-    runs-on: k8s-infrastructure-generic
+    runs-on: runs-on=${{ github.run_id }}/family=c5a.2xlarge+c6a.2xlarge/image=ubuntu24-full-x64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,7 +20,7 @@ jobs:
 
   linter:
     name: Code Linter
-    runs-on: k8s-infrastructure-generic
+    runs-on: runs-on=${{ github.run_id }}/family=c5a.2xlarge+c6a.2xlarge/image=ubuntu24-full-x64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
 
   tests:
     name: Tests
-    runs-on: k8s-infrastructure-generic
+    runs-on: runs-on=${{ github.run_id }}/family=c5a.2xlarge+c6a.2xlarge/image=ubuntu24-full-x64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
